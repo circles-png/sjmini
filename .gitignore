@@ -1,0 +1,6 @@
+# Cargo build artifacts
+/target/
+**/.idea
+.env
+.DS_Store
+timetable.subjective
