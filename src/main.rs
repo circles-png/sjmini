@@ -89,7 +89,7 @@ async fn get_start_time_task(
         .init(unsafe { from_raw_parts(0x1014_0000 as *const u8, 4752) })
         .await;
     control
-        .set_power_management(PowerManagementMode::PowerSave)
+        .set_power_management(PowerManagementMode::None)
         .await;
     info!("Connecting to WiFi...");
     *PROGRESS.lock().await = 1;
@@ -143,6 +143,9 @@ async fn get_start_time_task(
     socket.wait_recv_ready().await;
     let mut buf = [0u8; 256];
     socket.recv_from(&mut buf).await.unwrap();
+    control
+        .set_power_management(PowerManagementMode::ThroughputThrottling)
+        .await;
     let bytes = buf[40..48].try_into().unwrap();
     let date_time = DateTime::parse_from_rfc2822("Mon, 1 Jan 1900 00:00:00 +0000").unwrap()
         + TimeDelta::from_std(Duration::from_secs_f64(
@@ -171,19 +174,19 @@ async fn main(spawner: Spawner) {
     let p = embassy_rp::init(config::Config::default());
 
     let digit_commons = [
-        Output::new(p.PIN_19, Level::Low),
-        Output::new(p.PIN_18, Level::Low),
-        Output::new(p.PIN_17, Level::Low),
+        Output::new(p.PIN_20, Level::Low),
         Output::new(p.PIN_16, Level::Low),
+        Output::new(p.PIN_18, Level::Low),
+        Output::new(p.PIN_12, Level::Low),
     ];
-    let a = Flex::new(p.PIN_13);
-    let b = Flex::new(p.PIN_15);
-    let c = Flex::new(p.PIN_9);
-    let d = Flex::new(p.PIN_11);
-    let e = Flex::new(p.PIN_12);
-    let f = Flex::new(p.PIN_14);
-    let g = Flex::new(p.PIN_10);
-    let point = Flex::new(p.PIN_8);
+    let a = Flex::new(p.PIN_17);
+    let b = Flex::new(p.PIN_19);
+    let c = Flex::new(p.PIN_11);
+    let d = Flex::new(p.PIN_13);
+    let e = Flex::new(p.PIN_10);
+    let f = Flex::new(p.PIN_21);
+    let g = Flex::new(p.PIN_15);
+    let point = Flex::new(p.PIN_14);
     let subjective = include!(concat!(env!("OUT_DIR"), "/timetable.rs"));
     spawner
         .spawn(get_start_time_task(
@@ -273,23 +276,19 @@ impl App {
 
     fn render_state(&mut self, state: &State) {
         const DIVISOR: u64 = 1;
-        let digit = ((Instant::now().as_millis() / DIVISOR) % 4) as usize;
-        for (index, common) in self.commons.iter_mut().enumerate() {
-            common.set_level((index == digit).into());
-        }
-        for (index, segment) in self.segments.as_array_mut().iter_mut().enumerate() {
-            let bit = if digit == 1 && index == 0 {
-                state.colon
+        let segment = ((Instant::now().as_millis() / DIVISOR) % 8) as usize;
+        for (index, pin) in self.segments.as_array_mut().iter_mut().enumerate() {
+            // if index == segment || (index == 8 - 1 && state.colon) {
+            if index == segment {
+                pin.set_as_output();
+                pin.set_low();
             } else {
-                (state.digits[digit] >> (index)) & 1 == 1
-            };
-            if bit {
-                segment.set_as_output();
-                segment.set_low();
-            } else {
-                segment.set_as_input();
-                segment.set_pull(Pull::None);
+                pin.set_as_input();
+                pin.set_pull(Pull::None);
             }
+        }
+        for (common, digit) in self.commons.iter_mut().zip(state.digits) {
+            common.set_level((digit & (1 << (8 - 1 - segment)) != 0).into());
         }
     }
 }
